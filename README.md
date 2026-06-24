@@ -4,7 +4,7 @@ A lightweight, screensaver built for gamers using Steam, designed to mitigate bu
 
 The renderer is written in Rust for fast, efficient drawing directly to a black (OLED-safe) canvas. A small Python daemon handles fetching weather data and system stats. An optional watcher script can automatically launch the screensaver on a secondary monitor whenever a Steam game is running.
 
-Please note if you have smart app control enabled Windows will block this as it monitors your registry to auto start the bulk of the screensaver
+Please note make sure to unblock renderer.exe as win11 smart app control will block this. (Certs cost money rather not pay to get this signed)
 
 -- Features
 
