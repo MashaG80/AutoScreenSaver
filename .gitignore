@@ -1,0 +1,5 @@
+data_daemon/.venv/
+data_daemon/config.json
+data_daemon/state.json
+renderer/target/
+renderer/state.json
