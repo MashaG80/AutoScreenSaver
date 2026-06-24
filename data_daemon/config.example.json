@@ -1,5 +1,5 @@
 {
   "weather_api_key": "YOUR_OPENWEATHERMAP_API_KEY_HERE",
-  "latitude": 39.9526,
-  "longitude": -75.1652
+  "latitude": "YOUR_LATITUDE_HERE",
+  "longitude": "YOUR_LONGITUDE_HERE"
 }
