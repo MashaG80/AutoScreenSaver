@@ -11,6 +11,29 @@ use fontdue::{Font, FontSettings};
 use std::process::{Command, Child};
 use std::path::PathBuf;
 
+#[derive(Deserialize, Debug)]
+struct Config {
+    weather_api_key: String,
+    latitude: f64,
+    longitude: f64,
+    shift_amount: i32,
+    shift_period_secs: u64,
+    monitor_index: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            weather_api_key: String::new(),
+            latitude: 0.0,
+            longitude: 0.0,
+            shift_amount: 500,
+            shift_period_secs: 60,
+            monitor_index: 1,
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Default)]
 struct Clock {
     time: String,
@@ -42,13 +65,23 @@ struct State {
 
 fn get_project_root() -> PathBuf {
     let exe_path = std::env::current_exe().expect("Failed to get exe path");
-    // exe is at .../renderer/target/debug/renderer.exe (or .../release/...)
     exe_path
-        .parent().unwrap()  // target/debug or target/release
-        .parent().unwrap()  // target
-        .parent().unwrap()  // renderer
-        .parent().unwrap()  // oled-screensaver (project root)
+        .parent().unwrap()
+        .parent().unwrap()
+        .parent().unwrap()
+        .parent().unwrap()
         .to_path_buf()
+}
+
+fn load_config(project_root: &PathBuf) -> Config {
+    let path = project_root.join("data_daemon").join("config.json");
+    match fs::read_to_string(&path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+        Err(_) => {
+            println!("config.json not found, using defaults");
+            Config::default()
+        }
+    }
 }
 
 fn read_state(project_root: &PathBuf) -> State {
@@ -117,20 +150,18 @@ struct App {
     start_time: Instant,
     python_process: Option<Child>,
     project_root: PathBuf,
+    config: Config,
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // Get all available monitors
         let monitors: Vec<_> = event_loop.available_monitors().collect();
 
-        // Print them out for debugging (check terminal output)
         for (i, m) in monitors.iter().enumerate() {
             println!("Monitor {}: {:?} - {:?}", i, m.name(), m.size());
         }
 
-        // Pick the second monitor if it exists, otherwise fall back to primary
-        let target_monitor = monitors.get(1).cloned();
+        let target_monitor = monitors.get(self.config.monitor_index).cloned();
 
         let window = Rc::new(
             event_loop
@@ -142,12 +173,12 @@ impl ApplicationHandler for App {
                 .unwrap(),
         );
 
-    let context = softbuffer::Context::new(window.clone()).unwrap();
-    let surface = softbuffer::Surface::new(&context, window.clone()).unwrap();
+        let context = softbuffer::Context::new(window.clone()).unwrap();
+        let surface = softbuffer::Surface::new(&context, window.clone()).unwrap();
 
-    self.window = Some(window);
-    self.surface = Some(surface);
-}
+        self.window = Some(window);
+        self.surface = Some(surface);
+    }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
@@ -160,17 +191,17 @@ impl ApplicationHandler for App {
                 }
             }
 
-            //Rather not have mouse events myself uncomment if you want to test it with a mouse. The idea is to prevent accidental mouse movement from closing the screensaver.
-            //WindowEvent::MouseInput { .. } => {
-                //if self.start_time.elapsed().as_secs_f32() > 1.0 {
-                    //event_loop.exit();
-                //}
-            //}
-            //WindowEvent::CursorMoved { .. } => {
-                //if self.start_time.elapsed().as_secs_f32() > 1.0 {
-                    //event_loop.exit();
-                //}
-            //}
+            // Uncomment to also exit on mouse input
+            // WindowEvent::MouseInput { .. } => {
+            //     if self.start_time.elapsed().as_secs_f32() > 1.0 {
+            //         event_loop.exit();
+            //     }
+            // }
+            // WindowEvent::CursorMoved { .. } => {
+            //     if self.start_time.elapsed().as_secs_f32() > 1.0 {
+            //         event_loop.exit();
+            //     }
+            // }
 
             WindowEvent::RedrawRequested => {
                 let window = self.window.as_ref().unwrap();
@@ -196,8 +227,8 @@ impl ApplicationHandler for App {
                 let h = size.height as usize;
 
                 // --- Pixel-shift OLED protection ---
-                let shift_period_secs = 60;
-                let shift_amount = 500; 
+                let shift_period_secs = self.config.shift_period_secs;
+                let shift_amount = self.config.shift_amount;
 
                 let elapsed_secs = self.start_time.elapsed().as_secs();
                 let cycle = (elapsed_secs / shift_period_secs) % 4;
@@ -210,9 +241,11 @@ impl ApplicationHandler for App {
                     _ => (0, 0),
                 };
 
+                // Clock
                 draw_text(&mut buffer, w, h, &self.font, &state.clock.time, 60 + offset_x, 120 + offset_y, 80.0, 0xFFFFFF);
                 draw_text(&mut buffer, w, h, &self.font, &state.clock.date, 60 + offset_x, 170 + offset_y, 32.0, 0xAAAAAA);
 
+                // Weather
                 if let Some(err) = &state.weather.error {
                     draw_text(&mut buffer, w, h, &self.font, err, 60 + offset_x, 260 + offset_y, 32.0, 0x884444);
                 } else if !state.weather.stale {
@@ -220,11 +253,19 @@ impl ApplicationHandler for App {
                     let desc = state.weather.description.clone().unwrap_or_default();
                     let city = state.weather.city.clone().unwrap_or_default();
 
+                    let weather_color = if state.weather.stale { 0x666666 } else { 0xFFFFFF };
+                    let city_color = if state.weather.stale { 0x444444 } else { 0xAAAAAA };
+
                     let weather_line = format!("{}°F  {}", temp, desc);
-                    draw_text(&mut buffer, w, h, &self.font, &weather_line, 60 + offset_x, 260 + offset_y, 40.0, 0xFFFFFF);
-                    draw_text(&mut buffer, w, h, &self.font, &city, 60 + offset_x, 300 + offset_y, 28.0, 0xAAAAAA);
+                    draw_text(&mut buffer, w, h, &self.font, &weather_line, 60 + offset_x, 260 + offset_y, 40.0, weather_color);
+                    draw_text(&mut buffer, w, h, &self.font, &city, 60 + offset_x, 300 + offset_y, 28.0, city_color);
+
+                    if state.weather.stale {
+                        draw_text(&mut buffer, w, h, &self.font, "(offline - showing last known)", 60 + offset_x, 330 + offset_y, 20.0, 0x555555);
+                    }
                 }
 
+                // Sysinfo
                 let sys_line = format!("CPU: {:.1}%   RAM: {:.1}%", state.sysinfo.cpu, state.sysinfo.ram);
                 draw_text(&mut buffer, w, h, &self.font, &sys_line, 60 + offset_x, 380 + offset_y, 28.0, 0x888888);
 
@@ -239,6 +280,7 @@ impl ApplicationHandler for App {
 
 fn main() {
     let project_root = get_project_root();
+    let config = load_config(&project_root);
     let data_daemon_dir = project_root.join("data_daemon");
     let python_exe = data_daemon_dir.join(".venv").join("Scripts").join("python.exe");
     let script_path = data_daemon_dir.join("main.py");
@@ -262,6 +304,7 @@ fn main() {
         start_time: Instant::now(),
         python_process: Some(python_process),
         project_root,
+        config,
     };
 
     event_loop.run_app(&mut app).unwrap();
