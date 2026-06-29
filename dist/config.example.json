@@ -1,0 +1,5 @@
+{
+  "weather_api_key": "YOUR_OPENWEATHERMAP_API_KEY_HERE",
+  "latitude": "YOUR_LATITUDE_HERE",
+  "longitude": "YOUR_LONGITUDE_HERE"
+}

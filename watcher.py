@@ -2,9 +2,19 @@ import winreg
 import subprocess
 import time
 import os
+import sys
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-RENDERER_PATH = os.path.join(SCRIPT_DIR, "renderer", "target", "release", "renderer.exe")
+
+
+if getattr(sys, 'frozen', False):
+    # Running as PyInstaller bundle - look next to the exe
+    SCRIPT_DIR = os.path.dirname(sys.executable)
+    RENDERER_PATH = os.path.join(SCRIPT_DIR, "renderer.exe")
+else:
+    # Running as plain Python script - use dev build
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    RENDERER_PATH = os.path.join(SCRIPT_DIR, "renderer", "target", "release", "renderer.exe")
+
 POLL_INTERVAL = 2  # seconds
 
 def get_running_appid():

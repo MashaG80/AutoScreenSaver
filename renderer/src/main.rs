@@ -65,16 +65,35 @@ struct State {
 
 fn get_project_root() -> PathBuf {
     let exe_path = std::env::current_exe().expect("Failed to get exe path");
-    exe_path
-        .parent().unwrap()
-        .parent().unwrap()
-        .parent().unwrap()
-        .parent().unwrap()
+    let exe_dir = exe_path.parent().unwrap();
+
+    // Check if we're running from dist\ (flat structure)
+    // by seeing if data_daemon.exe exists next to us
+    if exe_dir.join("data_daemon.exe").exists() {
+        return exe_dir.to_path_buf();
+    }
+
+    // Otherwise assume dev build structure (renderer/target/release/)
+    exe_dir
+        .parent().unwrap()  // target/debug or target/release
+        .parent().unwrap()  // target
+        .parent().unwrap()  // renderer
+        .parent().unwrap()  // project root
         .to_path_buf()
 }
 
 fn load_config(project_root: &PathBuf) -> Config {
-    let path = project_root.join("data_daemon").join("config.json");
+    // In dist\ bundle, config.json is next to the exe
+    // In dev, it's in data_daemon/config.json
+    let bundled_path = project_root.join("config.json");
+    let dev_path = project_root.join("data_daemon").join("config.json");
+
+    let path = if bundled_path.exists() {
+        bundled_path
+    } else {
+        dev_path
+    };
+
     match fs::read_to_string(&path) {
         Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
         Err(_) => {
@@ -85,7 +104,15 @@ fn load_config(project_root: &PathBuf) -> Config {
 }
 
 fn read_state(project_root: &PathBuf) -> State {
-    let path = project_root.join("data_daemon").join("state.json");
+    let bundled_path = project_root.join("state.json");
+    let dev_path = project_root.join("data_daemon").join("state.json");
+
+    let path = if bundled_path.exists() {
+        bundled_path
+    } else {
+        dev_path
+    };
+
     match fs::read_to_string(&path) {
         Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
         Err(_) => State::default(),
@@ -282,14 +309,22 @@ fn main() {
     let project_root = get_project_root();
     let config = load_config(&project_root);
     let data_daemon_dir = project_root.join("data_daemon");
+    let daemon_exe = project_root.join("data_daemon.exe");
     let python_exe = data_daemon_dir.join(".venv").join("Scripts").join("python.exe");
     let script_path = data_daemon_dir.join("main.py");
-
-    let python_process = Command::new(&python_exe)
-        .arg(&script_path)
-        .current_dir(&data_daemon_dir)
-        .spawn()
-        .expect("Failed to start data daemon");
+    let python_process = if daemon_exe.exists() {
+        Command::new(&daemon_exe)
+            .current_dir(&project_root)
+            .spawn()
+            .expect("Failed to start data_daemon.exe")
+    } else {
+        println!("Spawning Python...");
+        Command::new(&python_exe)
+            .arg(&script_path)
+            .current_dir(&data_daemon_dir)
+            .spawn()
+            .expect("Failed to start data daemon via Python")
+    };
 
     let font_bytes = fs::read(r"C:\Windows\Fonts\segoeui.ttf").expect("Failed to read font file");
     let font = Font::from_bytes(font_bytes, FontSettings::default()).expect("Failed to parse font");
